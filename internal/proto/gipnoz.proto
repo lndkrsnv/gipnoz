@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package gipnoz;
+
+option go_package = "gipnoz/internal/proto";
+
+service Tunnel {
+  rpc Connect (stream Chunk) returns (stream Chunk);
+  rpc Health (HealthRequest) returns (HealthResponse);
+}
+
+message Chunk {
+  bytes payload = 1;
+  bytes padding = 2;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+}

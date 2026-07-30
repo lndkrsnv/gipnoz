@@ -1,0 +1,15 @@
+your-domain.com {
+	@grpc {
+		protocol grpc
+	}
+	reverse_proxy @grpc 127.0.0.1:8443 {
+		transport http {
+			versions h2c
+		}
+		flush_interval -1
+	}
+
+	root * /var/www/html
+	file_server
+
+}

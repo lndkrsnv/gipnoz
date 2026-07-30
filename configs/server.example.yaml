@@ -1,0 +1,25 @@
+listen:
+  address: "127.0.0.1:8443"
+
+auth:
+  # Server host key (Ed25519 seed, base64) — generate with:
+  #   gipnoz-server keygen
+  private_key: "base64-ed25519-seed-here"
+  # Allowed client identities — one entry per client, key from
+  # `gipnoz-client keygen`. The name shows up in server logs.
+  clients:
+    - name: "client1"
+      key: "base64-client-public-key-1"
+    # - name: "client2"
+    #   key: "base64-client-public-key-2"
+
+padding:
+  min: 16
+  max: 256
+
+timeouts:
+  connect_seconds: 10
+  idle_seconds: 300
+
+rate_limit:
+  max_streams_per_ip: 64

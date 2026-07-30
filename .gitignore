@@ -1,0 +1,11 @@
+.idea/
+.vscode/
+.DS_Store
+
+bin/
+*.test
+*-test*
+coverage.out
+*.coverprofile
+
+distribution/server/server.yaml

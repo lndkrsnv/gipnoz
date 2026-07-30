@@ -1,0 +1,41 @@
+server:
+  address: "your-domain.com:443"
+  sni: "your-domain.com"
+
+auth:
+  # Client identity key (Ed25519 seed, base64) — generate with:
+  #   gipnoz-client keygen
+  private_key: "base64-ed25519-seed-here"
+  # Server host public key (base64) — from `gipnoz-server keygen` on the server.
+  server_public_key: "base64-server-public-key-here"
+
+listen:
+  socks5: "127.0.0.1:1080"
+
+tls:
+  fingerprint: "chrome"           # chrome | firefox
+
+# dns:
+#   doh: "https://1.1.1.1/dns-query"  # DoH for DNS leak prevention (optional)
+
+padding:
+  min: 16
+  max: 256
+
+timeouts:
+  connect_seconds: 10
+  idle_seconds: 300
+
+# routing:
+#   # global     — everything through the tunnel (default)
+#   # bypass     — tunnel, except destinations matched by `direct` rules
+#   # proxy_only — direct, except destinations matched by `proxy` rules
+#   mode: global
+#   proxy:
+#     domains: ["example.com"]            # suffix match, covers subdomains
+#     domain_lists: ["lists/proxy.txt"]   # lines: `full:host`, `domain:example.com` or bare host
+#     geoip_lists: ["lists/ru-blocked.txt"]  # CIDRs, nginx `deny 1.2.3.0/24;` format also works
+#   direct:
+#     domains: ["local.lan"]
+#     domain_lists: []
+#     geoip_lists: []

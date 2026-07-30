@@ -1,0 +1,42 @@
+configs:
+  caddyfile:
+    content: |
+      {$$DOMAIN} {
+          @grpc protocol grpc
+          reverse_proxy @grpc gipnoz:8443 {
+              transport http {
+                  versions h2c
+              }
+              flush_interval -1
+          }
+          root * /srv
+          file_server
+      }
+
+services:
+  gipnoz:
+    image: ghcr.io/lndkrsnv/gipnoz:latest
+    restart: unless-stopped
+    command: ["-config", "/etc/gipnoz/server.yaml"]
+    volumes:
+      - ./server.yaml:/etc/gipnoz/server.yaml:ro
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      DOMAIN: your-domain.com
+    ports:
+      - "80:80"
+      - "443:443"
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - ./site:/srv:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

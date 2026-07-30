@@ -1,0 +1,19 @@
+listen:
+  address: "0.0.0.0:8443"
+
+auth:
+  private_key: "base64-ed25519-seed-here"
+  clients:
+    - name: "client"
+      key: "base64-client-public-key-here"
+
+padding:
+  min: 16
+  max: 256
+
+timeouts:
+  connect_seconds: 10
+  idle_seconds: 300
+
+rate_limit:
+  max_streams_per_ip: 64
