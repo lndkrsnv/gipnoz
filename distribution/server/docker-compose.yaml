@@ -20,6 +20,7 @@ services:
     command: ["-config", "/etc/gipnoz/server.yaml"]
     volumes:
       - ./server.yaml:/etc/gipnoz/server.yaml:ro
+      - ./logs:/var/log/gipnoz
 
   caddy:
     image: caddy:2

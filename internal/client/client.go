@@ -22,17 +22,19 @@ type Client struct {
 	tunnel      pb.TunnelClient
 	id          ed25519.PrivateKey
 	serverPub   ed25519.PublicKey
+	sessionID   []byte
 	padMin      int
 	padMax      int
 	router      *routing.Router
 	dialTimeout time.Duration
 }
 
-func New(tunnel pb.TunnelClient, id ed25519.PrivateKey, serverPub ed25519.PublicKey, padMin, padMax int, router *routing.Router, dialTimeout time.Duration) *Client {
+func New(tunnel pb.TunnelClient, id ed25519.PrivateKey, serverPub ed25519.PublicKey, sessionID []byte, padMin, padMax int, router *routing.Router, dialTimeout time.Duration) *Client {
 	return &Client{
 		tunnel:      tunnel,
 		id:          id,
 		serverPub:   serverPub,
+		sessionID:   sessionID,
 		padMin:      padMin,
 		padMax:      padMax,
 		router:      router,
@@ -94,7 +96,7 @@ func (c *Client) handleTunnel(conn net.Conn, targetAddr string) {
 }
 
 func (c *Client) handshake(stream pb.Tunnel_ConnectClient, targetAddr string) (enc, dec *crypto.Cipher, err error) {
-	helloPayload, eph, err := crypto.BuildClientHello(c.id, targetAddr)
+	helloPayload, eph, err := crypto.BuildClientHello(c.id, targetAddr, c.sessionID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build client hello: %w", err)
 	}
@@ -253,6 +255,11 @@ type RunConfig struct {
 func Run(cfg RunConfig) error {
 	serverAddr := cfg.ServerAddr
 
+	sessionID, err := crypto.GenerateSessionID()
+	if err != nil {
+		return err
+	}
+
 	if cfg.DoHURL != "" {
 		doh := NewDoHResolver(cfg.DoHURL)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -286,7 +293,7 @@ func Run(cfg RunConfig) error {
 	}
 
 	dialTimeout := time.Duration(cfg.ConnectSeconds) * time.Second
-	c := New(tunnel, id, serverPub, cfg.PadMin, cfg.PadMax, router, dialTimeout)
+	c := New(tunnel, id, serverPub, sessionID, cfg.PadMin, cfg.PadMax, router, dialTimeout)
 	return ListenSOCKS5(cfg.ListenAddr, c.HandleConn)
 }
 

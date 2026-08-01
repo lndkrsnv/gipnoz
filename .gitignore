@@ -9,3 +9,4 @@ coverage.out
 *.coverprofile
 
 distribution/server/server.yaml
+distribution/server/server.example.yaml

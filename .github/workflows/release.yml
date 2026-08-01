@@ -50,7 +50,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: cd distribution && zip -r gipnoz-server-${{ github.ref_name }}.zip server
+      - run: |
+          cp configs/server.example.yaml distribution/server/server.example.yaml
+          cd distribution && zip -r gipnoz-server-${{ github.ref_name }}.zip server
       - uses: softprops/action-gh-release@v3
         with:
           files: distribution/gipnoz-server-*.zip

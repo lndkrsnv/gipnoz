@@ -17,6 +17,8 @@ func newIdentity(t *testing.T) ed25519.PrivateKey {
 	return priv
 }
 
+var testSessionID = []byte("0123456789abcdef")
+
 func clientsWith(id ed25519.PrivateKey) map[string]ed25519.PublicKey {
 	pub := id.Public().(ed25519.PublicKey)
 	return map[string]ed25519.PublicKey{string(pub): pub}
@@ -27,7 +29,7 @@ func TestHandshakeRoundtrip(t *testing.T) {
 	serverID := newIdentity(t)
 	serverPub := serverID.Public().(ed25519.PublicKey)
 
-	clientPayload, clientEph, err := BuildClientHello(clientID, "example.com:443")
+	clientPayload, clientEph, err := BuildClientHello(clientID, "example.com:443", testSessionID)
 	if err != nil {
 		t.Fatalf("BuildClientHello: %v", err)
 	}
@@ -38,6 +40,9 @@ func TestHandshakeRoundtrip(t *testing.T) {
 	}
 	if hello.Target != "example.com:443" {
 		t.Fatalf("target mismatch: %q", hello.Target)
+	}
+	if !bytes.Equal(hello.SessionID, testSessionID) {
+		t.Fatalf("session id mismatch: %x", hello.SessionID)
 	}
 
 	serverPayload, serverEph, err := BuildServerHello(serverID, clientPayload)
@@ -93,7 +98,7 @@ func TestParseClientHelloUnknownKey(t *testing.T) {
 	clientID := newIdentity(t)
 	otherID := newIdentity(t)
 
-	payload, _, err := BuildClientHello(clientID, "example.com:443")
+	payload, _, err := BuildClientHello(clientID, "example.com:443", testSessionID)
 	if err != nil {
 		t.Fatalf("BuildClientHello: %v", err)
 	}
@@ -105,7 +110,7 @@ func TestParseClientHelloUnknownKey(t *testing.T) {
 func TestParseClientHelloExpired(t *testing.T) {
 	clientID := newIdentity(t)
 
-	payload, _, err := BuildClientHelloAt(clientID, time.Now().Add(-60*time.Second), "example.com:443")
+	payload, _, err := BuildClientHelloAt(clientID, time.Now().Add(-60*time.Second), "example.com:443", testSessionID)
 	if err != nil {
 		t.Fatalf("BuildClientHelloAt: %v", err)
 	}
@@ -117,7 +122,7 @@ func TestParseClientHelloExpired(t *testing.T) {
 func TestParseClientHelloTampered(t *testing.T) {
 	clientID := newIdentity(t)
 
-	payload, _, err := BuildClientHello(clientID, "example.com:443")
+	payload, _, err := BuildClientHello(clientID, "example.com:443", testSessionID)
 	if err != nil {
 		t.Fatalf("BuildClientHello: %v", err)
 	}
@@ -132,7 +137,7 @@ func TestParseServerHelloWrongKey(t *testing.T) {
 	serverID := newIdentity(t)
 	otherID := newIdentity(t)
 
-	clientPayload, _, err := BuildClientHello(clientID, "example.com:443")
+	clientPayload, _, err := BuildClientHello(clientID, "example.com:443", testSessionID)
 	if err != nil {
 		t.Fatalf("BuildClientHello: %v", err)
 	}
@@ -153,7 +158,7 @@ func TestSessionKeysUniquePerSession(t *testing.T) {
 	serverPub := serverID.Public().(ed25519.PublicKey)
 
 	derive := func() []byte {
-		clientPayload, clientEph, err := BuildClientHello(clientID, "example.com:443")
+		clientPayload, clientEph, err := BuildClientHello(clientID, "example.com:443", testSessionID)
 		if err != nil {
 			t.Fatalf("BuildClientHello: %v", err)
 		}

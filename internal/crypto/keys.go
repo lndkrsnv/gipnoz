@@ -38,3 +38,11 @@ func ParsePublicKey(pubB64 string) (ed25519.PublicKey, error) {
 	}
 	return ed25519.PublicKey(pub), nil
 }
+
+func GenerateSessionID() ([]byte, error) {
+	id := make([]byte, SessionIDLen)
+	if _, err := rand.Read(id); err != nil {
+		return nil, fmt.Errorf("generate session id: %w", err)
+	}
+	return id, nil
+}

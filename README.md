@@ -15,6 +15,7 @@ regular HTTPS traffic.
   [runetfreedom](https://github.com/runetfreedom/russia-blocked-geoip) lists
   supported out of the box.
 - **DoH** — optional resolver against DNS leaks.
+- **One key = one device** — sharing protection.
 
 
 ## Server setup

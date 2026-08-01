@@ -78,6 +78,8 @@ func newTestPair(t *testing.T) (clientID, serverID ed25519.PrivateKey) {
 	return clientID, serverID
 }
 
+var testSessionID = []byte("0123456789abcdef")
+
 func newTunnelServer(t *testing.T, clientID, serverID ed25519.PrivateKey) *server.TunnelServer {
 	t.Helper()
 	clientPub := clientID.Public().(ed25519.PublicKey)
@@ -101,7 +103,7 @@ func TestHandleConnEndToEnd(t *testing.T) {
 	tunnel := bufconnTunnel(t, newTunnelServer(t, clientID, serverID))
 
 	serverPub := serverID.Public().(ed25519.PublicKey)
-	c := New(tunnel, clientID, serverPub, 16, 256, nil, 2*time.Second)
+	c := New(tunnel, clientID, serverPub, testSessionID, 16, 256, nil, 2*time.Second)
 
 	p1, p2 := net.Pipe()
 	defer p1.Close()
@@ -133,7 +135,7 @@ func TestHandleConnWrongServerPin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate rogue key: %v", err)
 	}
-	c := New(tunnel, clientID, rogueID.Public().(ed25519.PublicKey), 16, 256, nil, 2*time.Second)
+	c := New(tunnel, clientID, rogueID.Public().(ed25519.PublicKey), testSessionID, 16, 256, nil, 2*time.Second)
 
 	p1, p2 := net.Pipe()
 	defer p1.Close()
@@ -157,7 +159,7 @@ func TestHandleConnDirectRouting(t *testing.T) {
 
 	serverPub := serverID.Public().(ed25519.PublicKey)
 	router := routing.New(routing.Config{Mode: routing.ModeProxyOnly})
-	c := New(tunnel, clientID, serverPub, 16, 256, router, 2*time.Second)
+	c := New(tunnel, clientID, serverPub, testSessionID, 16, 256, router, 2*time.Second)
 
 	p1, p2 := net.Pipe()
 	defer p1.Close()

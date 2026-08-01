@@ -51,9 +51,10 @@ type ServerConfig struct {
 		PrivateKey string        `yaml:"private_key"`
 		Clients    []ClientEntry `yaml:"clients"`
 	} `yaml:"auth"`
-	Padding   PaddingConfig   `yaml:"padding"`
-	Timeouts  TimeoutConfig   `yaml:"timeouts"`
-	RateLimit RateLimitConfig `yaml:"rate_limit"`
+	SecurityLog string          `yaml:"security_log"`
+	Padding     PaddingConfig   `yaml:"padding"`
+	Timeouts    TimeoutConfig   `yaml:"timeouts"`
+	RateLimit   RateLimitConfig `yaml:"rate_limit"`
 }
 
 type ClientEntry struct {

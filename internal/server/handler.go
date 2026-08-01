@@ -27,19 +27,23 @@ type TunnelServer struct {
 	padMax      int
 	replay      *crypto.ReplayGuard
 	rateLimiter *RateLimiter
+	sessions    *sessionRegistry
+	secLog      *slog.Logger
 	dialTimeout time.Duration
 	idleTimeout time.Duration
 }
 
 type TunnelServerConfig struct {
-	HostKey     ed25519.PrivateKey
-	Clients     map[string]ClientIdentity
-	PadMin      int
-	PadMax      int
-	Replay      *crypto.ReplayGuard
-	RateLimiter *RateLimiter
-	DialTimeout time.Duration
-	IdleTimeout time.Duration
+	HostKey      ed25519.PrivateKey
+	Clients      map[string]ClientIdentity
+	PadMin       int
+	PadMax       int
+	Replay       *crypto.ReplayGuard
+	RateLimiter  *RateLimiter
+	SecLog       *slog.Logger
+	SessionGrace time.Duration
+	DialTimeout  time.Duration
+	IdleTimeout  time.Duration
 }
 
 func NewTunnelServer(cfg TunnelServerConfig) *TunnelServer {
@@ -55,6 +59,8 @@ func NewTunnelServer(cfg TunnelServerConfig) *TunnelServer {
 		padMax:      cfg.PadMax,
 		replay:      cfg.Replay,
 		rateLimiter: cfg.RateLimiter,
+		sessions:    newSessionRegistry(cfg.SessionGrace),
+		secLog:      cfg.SecLog,
 		dialTimeout: cfg.DialTimeout,
 		idleTimeout: cfg.IdleTimeout,
 	}
@@ -85,6 +91,29 @@ func (s *TunnelServer) Connect(stream pb.Tunnel_ConnectServer) error {
 	if !s.replay.Check(hello.Sig) {
 		slog.Warn("replay detected", "ip", clientIP, "client", clientName)
 		return status.Error(codes.Unauthenticated, "invalid request")
+	}
+
+	keyStr := string(hello.IDPub)
+	sessionID := string(hello.SessionID)
+	admit := s.sessions.admit(keyStr, sessionID, clientIP, time.Now())
+	if admit.busy {
+		slog.Warn("session busy", "ip", clientIP, "client", clientName, "holder_ip", admit.holderIP)
+		if s.secLog != nil && clientIP != admit.holderIP && !s.sessions.busyLoggedRecently(keyStr, time.Now()) {
+			s.secLog.Warn("possible key sharing",
+				"client", clientName, "ip", clientIP, "reason", "session busy",
+				"holder_ip", admit.holderIP,
+			)
+		}
+		return status.Error(codes.ResourceExhausted, "key in use by another device")
+	}
+	if admit.takeover {
+		slog.Info("new session", "client", clientName, "ip", clientIP)
+		if admit.flaps == flapThreshold && s.secLog != nil {
+			s.secLog.Warn("possible key sharing",
+				"client", clientName, "ip", clientIP, "reason", "session flapping",
+				"flaps", admit.flaps,
+			)
+		}
 	}
 
 	slog.Info("connecting to target", "addr", hello.Target, "ip", clientIP, "client", clientName)
@@ -124,7 +153,9 @@ func (s *TunnelServer) Connect(stream pb.Tunnel_ConnectServer) error {
 		return status.Error(codes.Internal, "failed to send handshake reply")
 	}
 
-	relay(stream, conn, decCipher, encCipher, s.padMin, s.padMax, s.idleTimeout)
+	relay(stream, conn, decCipher, encCipher, s.padMin, s.padMax, s.idleTimeout, func() {
+		s.sessions.release(keyStr, sessionID, time.Now())
+	})
 	return nil
 }
 
