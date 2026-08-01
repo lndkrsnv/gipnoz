@@ -43,6 +43,7 @@ jobs:
         with:
           files: gipnoz-client-*
           fail_on_unmatched_files: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
   docker-bundle:
     needs: test
@@ -54,6 +55,7 @@ jobs:
         with:
           files: distribution/gipnoz-server-*.zip
           fail_on_unmatched_files: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
   server-image:
     needs: test
@@ -66,6 +68,14 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: resolve image tags
+        id: meta
+        run: |
+          tags="ghcr.io/${GITHUB_REPOSITORY}:${GITHUB_REF_NAME}"
+          if [[ "$GITHUB_REF_NAME" != *-* ]]; then
+            tags="${tags},ghcr.io/${GITHUB_REPOSITORY}:latest"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
       - name: build and push
         uses: docker/build-push-action@v7
         with:
@@ -73,9 +83,7 @@ jobs:
           file: deploy/Dockerfile
           push: true
           provenance: false
-          tags: |
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}:latest
+          tags: ${{ steps.meta.outputs.tags }}
           platforms: linux/amd64
 
   cleanup:

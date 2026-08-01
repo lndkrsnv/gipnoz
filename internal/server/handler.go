@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"log/slog"
 	"net"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -133,7 +134,7 @@ func (s *TunnelServer) Health(_ context.Context, _ *pb.HealthRequest) (*pb.Healt
 
 func peerIP(ctx context.Context) string {
 	direct := directPeerIP(ctx)
-	if direct != "" && !isLoopback(direct) {
+	if direct != "" && !isTrustedProxy(direct) {
 		return direct
 	}
 
@@ -160,7 +161,7 @@ func directPeerIP(ctx context.Context) string {
 	return host
 }
 
-func isLoopback(ip string) bool {
-	parsed := net.ParseIP(ip)
-	return parsed != nil && parsed.IsLoopback()
+func isTrustedProxy(ip string) bool {
+	parsed, err := netip.ParseAddr(ip)
+	return err == nil && (parsed.IsLoopback() || parsed.IsPrivate())
 }

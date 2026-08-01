@@ -11,6 +11,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
@@ -151,5 +153,54 @@ func TestHandlerReplay(t *testing.T) {
 	code, _ = f.attemptHello(t, payload)
 	if code != codes.Unauthenticated {
 		t.Fatalf("second attempt (replay): want Unauthenticated, got %s", code)
+	}
+}
+
+func TestPeerIP(t *testing.T) {
+	ctxWithPeer := func(addr string) context.Context {
+		return peer.NewContext(context.Background(), &peer.Peer{Addr: &net.TCPAddr{IP: net.ParseIP(addr), Port: 1234}})
+	}
+	withXFF := func(ctx context.Context, xff string) context.Context {
+		return metadata.NewIncomingContext(ctx, metadata.Pairs("x-forwarded-for", xff))
+	}
+
+	tests := []struct {
+		name string
+		ctx  context.Context
+		want string
+	}{
+		{
+			name: "public direct peer, no xff",
+			ctx:  ctxWithPeer("203.0.113.10"),
+			want: "203.0.113.10",
+		},
+		{
+			name: "private direct peer (docker proxy), xff wins",
+			ctx:  withXFF(ctxWithPeer("172.18.0.3"), "198.51.100.7, 172.18.0.1"),
+			want: "198.51.100.7",
+		},
+		{
+			name: "loopback direct peer, xff wins",
+			ctx:  withXFF(ctxWithPeer("127.0.0.1"), "198.51.100.7"),
+			want: "198.51.100.7",
+		},
+		{
+			name: "public direct peer, xff ignored (spoofing)",
+			ctx:  withXFF(ctxWithPeer("203.0.113.10"), "198.51.100.7"),
+			want: "203.0.113.10",
+		},
+		{
+			name: "private direct peer, empty xff",
+			ctx:  ctxWithPeer("172.18.0.3"),
+			want: "172.18.0.3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := peerIP(tt.ctx); got != tt.want {
+				t.Fatalf("peerIP: want %s, got %s", tt.want, got)
+			}
+		})
 	}
 }
