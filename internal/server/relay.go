@@ -11,7 +11,7 @@ import (
 	pb "gipnoz/internal/proto"
 )
 
-func relay(stream pb.Tunnel_ConnectServer, conn net.Conn, decCipher, encCipher *crypto.Cipher, padMin, padMax int, idleTimeout time.Duration) {
+func relay(stream pb.Tunnel_ConnectServer, conn net.Conn, decCipher, encCipher *crypto.Cipher, padMin, padMax int, idleTimeout time.Duration, onClientClosed func()) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -19,6 +19,7 @@ func relay(stream pb.Tunnel_ConnectServer, conn net.Conn, decCipher, encCipher *
 
 	go func() {
 		defer wg.Done()
+		defer onClientClosed()
 		streamToConn(stream, conn, decCipher, idleTimeout)
 	}()
 

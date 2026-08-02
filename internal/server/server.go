@@ -26,6 +26,12 @@ func Run(cfg *config.ServerConfig) error {
 		return err
 	}
 
+	secLog, secLogClose, err := openSecurityLog(cfg.SecurityLog)
+	if err != nil {
+		return err
+	}
+	defer secLogClose()
+
 	lis, err := net.Listen("tcp", cfg.Listen.Address)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
@@ -33,14 +39,16 @@ func Run(cfg *config.ServerConfig) error {
 
 	srv := grpc.NewServer()
 	tunnelSrv := NewTunnelServer(TunnelServerConfig{
-		HostKey:     hostKey,
-		Clients:     clients,
-		PadMin:      cfg.Padding.Min,
-		PadMax:      cfg.Padding.Max,
-		Replay:      crypto.NewReplayGuard(crypto.TimestampToleranceSeconds),
-		RateLimiter: NewRateLimiter(cfg.RateLimit.MaxStreamsPerIP),
-		DialTimeout: time.Duration(cfg.Timeouts.ConnectSeconds) * time.Second,
-		IdleTimeout: time.Duration(cfg.Timeouts.IdleSeconds) * time.Second,
+		HostKey:      hostKey,
+		Clients:      clients,
+		PadMin:       cfg.Padding.Min,
+		PadMax:       cfg.Padding.Max,
+		Replay:       crypto.NewReplayGuard(crypto.TimestampToleranceSeconds),
+		RateLimiter:  NewRateLimiter(cfg.RateLimit.MaxStreamsPerIP),
+		SecLog:       secLog,
+		SessionGrace: time.Minute,
+		DialTimeout:  time.Duration(cfg.Timeouts.ConnectSeconds) * time.Second,
+		IdleTimeout:  time.Duration(cfg.Timeouts.IdleSeconds) * time.Second,
 	})
 	pb.RegisterTunnelServer(srv, tunnelSrv)
 
@@ -54,4 +62,20 @@ func Run(cfg *config.ServerConfig) error {
 
 	slog.Info("gipnoz server starting", "addr", cfg.Listen.Address)
 	return srv.Serve(lis)
+}
+
+func openSecurityLog(path string) (*slog.Logger, func(), error) {
+	if path == "" {
+		return nil, func() {}, nil
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+	if err != nil {
+		return nil, nil, fmt.Errorf("security_log: %w", err)
+	}
+	logger := slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	return logger, func() {
+		if err := f.Close(); err != nil {
+			slog.Warn("security log close error", "err", err)
+		}
+	}, nil
 }
