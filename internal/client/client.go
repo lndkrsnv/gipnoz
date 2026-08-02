@@ -21,12 +21,25 @@ import (
 	"google.golang.org/grpc"
 )
 
+const (
+	StatusConnecting   = "connecting"
+	StatusConnected    = "connected"
+	StatusReconnecting = "reconnecting"
+	StatusError        = "error"
+)
+
 type Client struct {
 	mu         sync.Mutex
 	dial       func() (pb.TunnelClient, *grpc.ClientConn, error)
 	tunnel     pb.TunnelClient
 	conn       *grpc.ClientConn
 	generation uint64
+	stopped    bool
+	onStatus   func(status, detail string)
+	wg         sync.WaitGroup
+
+	txBytes atomic.Int64
+	rxBytes atomic.Int64
 
 	id          ed25519.PrivateKey
 	serverPub   ed25519.PublicKey
@@ -54,10 +67,15 @@ func New(dial func() (pb.TunnelClient, *grpc.ClientConn, error), id ed25519.Priv
 	return c, nil
 }
 
+var errClientClosed = fmt.Errorf("client closed")
+
 func (c *Client) redial(generation uint64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.stopped {
+		return errClientClosed
+	}
 	if c.generation != generation {
 		return nil
 	}
@@ -74,15 +92,79 @@ func (c *Client) redial(generation uint64) error {
 	return nil
 }
 
+const closeDrainTimeout = 5 * time.Second
+
 func (c *Client) Close() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn != nil {
-		c.conn.Close()
+	if c.stopped {
+		c.mu.Unlock()
+		return
+	}
+	c.stopped = true
+	conn := c.conn
+	c.mu.Unlock()
+
+	if conn != nil {
+		conn.Close()
+	}
+
+	drained := make(chan struct{})
+	go func() {
+		c.wg.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(closeDrainTimeout):
+		slog.Warn("client close: timed out waiting for active connections")
 	}
 }
 
+func (c *Client) SetStatusHandler(fn func(status, detail string)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onStatus = fn
+}
+
+func (c *Client) emitStatus(status, detail string) {
+	c.mu.Lock()
+	fn := c.onStatus
+	c.mu.Unlock()
+	if fn != nil {
+		fn(status, detail)
+	}
+}
+
+func (c *Client) TxBytes() int64 {
+	return c.txBytes.Load()
+}
+
+func (c *Client) RxBytes() int64 {
+	return c.rxBytes.Load()
+}
+
+func (c *Client) Ping(ctx context.Context) error {
+	c.mu.Lock()
+	tunnel := c.tunnel
+	c.mu.Unlock()
+	if tunnel == nil {
+		return errClientClosed
+	}
+	_, err := tunnel.Health(ctx, &pb.HealthRequest{})
+	return err
+}
+
 func (c *Client) HandleConn(conn net.Conn, targetAddr string) {
+	c.mu.Lock()
+	if c.stopped {
+		c.mu.Unlock()
+		conn.Close()
+		return
+	}
+	c.wg.Add(1)
+	c.mu.Unlock()
+	defer c.wg.Done()
+
 	if c.router != nil && c.router.Decide(targetAddr) == routing.Direct {
 		c.handleDirect(conn, targetAddr)
 		return
@@ -96,7 +178,11 @@ func (c *Client) handleTunnel(conn net.Conn, targetAddr string) {
 
 	stream, encCipher, decCipher, stopStream, err := c.openStream(targetAddr)
 	if err != nil {
+		if errors.Is(err, errClientClosed) {
+			return
+		}
 		slog.Warn("failed to open tunnel", "err", err)
+		c.emitStatus(StatusError, err.Error())
 		return
 	}
 	defer stopStream()
@@ -141,10 +227,14 @@ func (c *Client) openStream(targetAddr string) (pb.Tunnel_ConnectClient, *crypto
 		return nil, nil, nil, nil, err
 	}
 	slog.Info("handshake timed out, redialing")
+	c.emitStatus(StatusReconnecting, "")
 	if redialErr := c.redial(generation); redialErr != nil {
 		return nil, nil, nil, nil, redialErr
 	}
 	stream, enc, dec, _, stop, err = c.tryOpen(targetAddr)
+	if err == nil {
+		c.emitStatus(StatusConnected, "")
+	}
 	return stream, enc, dec, stop, err
 }
 
@@ -230,6 +320,7 @@ func (c *Client) upload(conn net.Conn, stream pb.Tunnel_ConnectClient, cipher *c
 		n, err := conn.Read(buf)
 		if n > 0 {
 			sent += int64(n)
+			c.txBytes.Add(int64(n))
 			if sendErr := sendChunk(stream, cipher, buf[:n], c.padMin, c.padMax); sendErr != nil {
 				slog.Warn("stream send error", "err", sendErr)
 				return sent
@@ -260,6 +351,7 @@ func (c *Client) download(conn net.Conn, stream pb.Tunnel_ConnectClient, cipher 
 			return received
 		}
 		received += int64(len(plaintext))
+		c.rxBytes.Add(int64(len(plaintext)))
 		if _, err := conn.Write(plaintext); err != nil {
 			slog.Debug("conn write error", "err", err)
 			return received
@@ -283,7 +375,7 @@ func (c *Client) handleDirect(conn net.Conn, targetAddr string) {
 	defer conn.Close()
 	start := time.Now()
 
-	target, err := net.DialTimeout("tcp", targetAddr, c.dialTimeout)
+	target, err := (&net.Dialer{Timeout: c.dialTimeout, Control: protectControl}).Dial("tcp", targetAddr)
 	if err != nil {
 		slog.Warn("direct dial failed", "addr", targetAddr, "err", err)
 		return
@@ -341,14 +433,15 @@ type RunConfig struct {
 	PadMax          int
 	ConnectSeconds  int
 	Routing         config.RoutingConfig
+	OnStatus        func(status, detail string)
 }
 
-func Run(cfg RunConfig) error {
+func Start(cfg RunConfig) (*Client, net.Listener, error) {
 	serverAddr := cfg.ServerAddr
 
 	sessionID, err := crypto.GenerateSessionID()
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	if cfg.DoHURL != "" {
@@ -357,7 +450,7 @@ func Run(cfg RunConfig) error {
 		resolved, err := doh.ResolveAddress(ctx, serverAddr)
 		cancel()
 		if err != nil {
-			return fmt.Errorf("doh resolve server address: %w", err)
+			return nil, nil, fmt.Errorf("doh resolve server address: %w", err)
 		}
 		slog.Info("server address resolved via DoH", "addr", cfg.ServerAddr, "resolved", resolved)
 		serverAddr = resolved
@@ -369,25 +462,50 @@ func Run(cfg RunConfig) error {
 
 	id, err := crypto.ParsePrivateKey(cfg.PrivateKey)
 	if err != nil {
-		return fmt.Errorf("auth.private_key: %w", err)
+		return nil, nil, fmt.Errorf("auth.private_key: %w", err)
 	}
 	serverPub, err := crypto.ParsePublicKey(cfg.ServerPublicKey)
 	if err != nil {
-		return fmt.Errorf("auth.server_public_key: %w", err)
+		return nil, nil, fmt.Errorf("auth.server_public_key: %w", err)
 	}
 
 	router, err := buildRouter(cfg.Routing, cfg.DoHURL)
 	if err != nil {
-		return err
+		return nil, nil, err
+	}
+
+	emitStatus := cfg.OnStatus
+	if emitStatus == nil {
+		emitStatus = func(_, _ string) {}
 	}
 
 	dialTimeout := time.Duration(cfg.ConnectSeconds) * time.Second
+	emitStatus(StatusConnecting, "")
 	c, err := New(dial, id, serverPub, sessionID, cfg.PadMin, cfg.PadMax, router, dialTimeout)
 	if err != nil {
-		return fmt.Errorf("dial server: %w", err)
+		return nil, nil, fmt.Errorf("dial server: %w", err)
+	}
+	c.SetStatusHandler(cfg.OnStatus)
+
+	var lis net.Listener
+	if cfg.ListenAddr != "" {
+		lis, err = net.Listen("tcp", cfg.ListenAddr)
+		if err != nil {
+			c.Close()
+			return nil, nil, fmt.Errorf("socks5 listen: %w", err)
+		}
+		slog.Info("socks5 listening", "addr", cfg.ListenAddr)
+	}
+	return c, lis, nil
+}
+
+func Run(cfg RunConfig) error {
+	c, lis, err := Start(cfg)
+	if err != nil {
+		return err
 	}
 	defer c.Close()
-	return ListenSOCKS5(cfg.ListenAddr, c.HandleConn)
+	return ServeSOCKS5(lis, c.HandleConn)
 }
 
 func buildRouter(cfg config.RoutingConfig, dohURL string) (*routing.Router, error) {

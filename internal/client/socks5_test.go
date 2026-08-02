@@ -60,6 +60,31 @@ func TestSocks5HandshakeDomain(t *testing.T) {
 	}
 }
 
+func TestServeSOCKS5ReturnsOnListenerClose(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- ServeSOCKS5(lis, func(conn net.Conn, targetAddr string) {})
+	}()
+
+	if err := lis.Close(); err != nil {
+		t.Fatalf("close listener: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ServeSOCKS5 returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ServeSOCKS5 did not return after listener close")
+	}
+}
+
 func TestSocks5HandshakeBadVersion(t *testing.T) {
 	p1, p2 := net.Pipe()
 	defer p1.Close()

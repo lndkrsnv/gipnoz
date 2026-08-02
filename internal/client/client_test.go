@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"io"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -246,5 +248,109 @@ func TestHandleConnRedialAfterTimeout(t *testing.T) {
 	}
 	if dials != 2 {
 		t.Fatalf("want 2 dials (initial + redial), got %d", dials)
+	}
+}
+
+func TestCloseStopsHandleConn(t *testing.T) {
+	echo := echoTarget(t)
+	clientID, serverID := newTestPair(t)
+	serverPub := serverID.Public().(ed25519.PublicKey)
+
+	lis := bufconn.Listen(1024 * 1024)
+	grpcSrv := grpc.NewServer()
+	pb.RegisterTunnelServer(grpcSrv, newTunnelServer(t, clientID, serverID))
+	go func() { _ = grpcSrv.Serve(lis) }()
+	t.Cleanup(grpcSrv.Stop)
+
+	dials := 0
+	dial := func() (pb.TunnelClient, *grpc.ClientConn, error) {
+		dials++
+		conn, err := grpc.NewClient("passthrough:///bufnet",
+			grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+				return lis.DialContext(ctx)
+			}),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+		return pb.NewTunnelClient(conn), conn, nil
+	}
+	c, err := New(dial, clientID, serverPub, testSessionID, 16, 256, nil, 2*time.Second)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	p1, p2 := net.Pipe()
+	defer p2.Close()
+	if err := p2.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		c.HandleConn(p1, echo)
+		close(done)
+	}()
+
+	msg := []byte("ping before close")
+	go func() { _, _ = p2.Write(msg) }()
+	if _, err := io.ReadFull(p2, make([]byte, len(msg))); err != nil {
+		t.Fatalf("read echo: %v", err)
+	}
+
+	c.Close()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("HandleConn did not finish after Close")
+	}
+
+	if err := c.redial(c.generation); !errors.Is(err, errClientClosed) {
+		t.Fatalf("redial after Close: want errClientClosed, got %v", err)
+	}
+	if dials != 1 {
+		t.Fatalf("want 1 dial, got %d", dials)
+	}
+}
+
+func TestProtectorAppliedToDirectDial(t *testing.T) {
+	echo := echoTarget(t)
+	clientID, serverID := newTestPair(t)
+	tunnel := bufconnTunnel(t, newTunnelServer(t, clientID, serverID))
+
+	serverPub := serverID.Public().(ed25519.PublicKey)
+	router := routing.New(routing.Config{Mode: routing.ModeProxyOnly})
+	c := newClient(t, tunnel, clientID, serverPub, router)
+
+	var calls atomic.Int32
+	SetProtector(func(fd uintptr) bool {
+		calls.Add(1)
+		return true
+	})
+	t.Cleanup(func() { SetProtector(nil) })
+
+	p1, p2 := net.Pipe()
+	defer p1.Close()
+	defer p2.Close()
+	go c.HandleConn(p1, echo)
+
+	if err := p2.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+
+	msg := []byte("hello protected direct")
+	go func() { _, _ = p2.Write(msg) }()
+
+	buf := make([]byte, len(msg))
+	if _, err := io.ReadFull(p2, buf); err != nil {
+		t.Fatalf("read echo: %v", err)
+	}
+	if !bytes.Equal(buf, msg) {
+		t.Fatalf("echo mismatch: got %q, want %q", buf, msg)
+	}
+	if calls.Load() == 0 {
+		t.Fatal("protector was not called for direct dial")
 	}
 }

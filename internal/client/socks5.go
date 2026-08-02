@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -21,16 +22,13 @@ const (
 	repUnsupportedAt = 0x08
 )
 
-func ListenSOCKS5(listenAddr string, handler func(conn net.Conn, targetAddr string)) error {
-	lis, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		return fmt.Errorf("socks5 listen: %w", err)
-	}
-	slog.Info("socks5 listening", "addr", listenAddr)
-
+func ServeSOCKS5(lis net.Listener, handler func(conn net.Conn, targetAddr string)) error {
 	for {
 		conn, err := lis.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return nil
+			}
 			slog.Warn("socks5 accept error", "err", err)
 			continue
 		}

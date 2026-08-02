@@ -22,8 +22,13 @@ type DoHResolver struct {
 
 func NewDoHResolver(url string) *DoHResolver {
 	return &DoHResolver{
-		url:    url,
-		client: &http.Client{Timeout: 5 * time.Second},
+		url: url,
+		client: &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{Timeout: 5 * time.Second, Control: protectControl}).DialContext,
+			},
+		},
 	}
 }
 

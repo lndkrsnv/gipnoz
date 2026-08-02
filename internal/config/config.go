@@ -81,6 +81,10 @@ func LoadClient(path string) (*ClientConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
+	return ParseClient(data)
+}
+
+func ParseClient(data []byte) (*ClientConfig, error) {
 	var cfg ClientConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)

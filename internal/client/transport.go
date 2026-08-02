@@ -24,6 +24,9 @@ func DialServer(address, sni, fingerprint string, insecureMode bool) (pb.TunnelC
 	if sni != "" {
 		opts = append(opts, grpc.WithAuthority(sni))
 	}
+	opts = append(opts, grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
+		return (&net.Dialer{Control: protectControl}).DialContext(ctx, "tcp", addr)
+	}))
 
 	conn, err := grpc.NewClient("passthrough:///"+address, opts...)
 	if err != nil {
