@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -16,10 +17,17 @@ import (
 	"gipnoz/internal/crypto"
 	pb "gipnoz/internal/proto"
 	"gipnoz/internal/routing"
+
+	"google.golang.org/grpc"
 )
 
 type Client struct {
-	tunnel      pb.TunnelClient
+	mu         sync.Mutex
+	dial       func() (pb.TunnelClient, *grpc.ClientConn, error)
+	tunnel     pb.TunnelClient
+	conn       *grpc.ClientConn
+	generation uint64
+
 	id          ed25519.PrivateKey
 	serverPub   ed25519.PublicKey
 	sessionID   []byte
@@ -29,9 +37,9 @@ type Client struct {
 	dialTimeout time.Duration
 }
 
-func New(tunnel pb.TunnelClient, id ed25519.PrivateKey, serverPub ed25519.PublicKey, sessionID []byte, padMin, padMax int, router *routing.Router, dialTimeout time.Duration) *Client {
-	return &Client{
-		tunnel:      tunnel,
+func New(dial func() (pb.TunnelClient, *grpc.ClientConn, error), id ed25519.PrivateKey, serverPub ed25519.PublicKey, sessionID []byte, padMin, padMax int, router *routing.Router, dialTimeout time.Duration) (*Client, error) {
+	c := &Client{
+		dial:        dial,
 		id:          id,
 		serverPub:   serverPub,
 		sessionID:   sessionID,
@@ -39,6 +47,38 @@ func New(tunnel pb.TunnelClient, id ed25519.PrivateKey, serverPub ed25519.Public
 		padMax:      padMax,
 		router:      router,
 		dialTimeout: dialTimeout,
+	}
+	if err := c.redial(0); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func (c *Client) redial(generation uint64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.generation != generation {
+		return nil
+	}
+	if c.conn != nil {
+		c.conn.Close()
+	}
+	tunnel, conn, err := c.dial()
+	if err != nil {
+		return err
+	}
+	c.tunnel = tunnel
+	c.conn = conn
+	c.generation++
+	return nil
+}
+
+func (c *Client) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn != nil {
+		c.conn.Close()
 	}
 }
 
@@ -54,17 +94,12 @@ func (c *Client) handleTunnel(conn net.Conn, targetAddr string) {
 	defer conn.Close()
 	start := time.Now()
 
-	stream, err := c.tunnel.Connect(context.Background())
+	stream, encCipher, decCipher, stopStream, err := c.openStream(targetAddr)
 	if err != nil {
-		slog.Warn("failed to open stream", "err", err)
+		slog.Warn("failed to open tunnel", "err", err)
 		return
 	}
-
-	encCipher, decCipher, err := c.handshake(stream, targetAddr)
-	if err != nil {
-		slog.Warn("handshake failed", "err", err)
-		return
-	}
+	defer stopStream()
 	slog.Info("tunnel opened", "target", targetAddr)
 
 	var (
@@ -93,6 +128,62 @@ func (c *Client) handleTunnel(conn net.Conn, targetAddr string) {
 		"sent", bytesSent,
 		"recv", bytesRecv,
 	)
+}
+
+var errHandshakeTimeout = fmt.Errorf("handshake timeout")
+
+func (c *Client) openStream(targetAddr string) (pb.Tunnel_ConnectClient, *crypto.Cipher, *crypto.Cipher, context.CancelFunc, error) {
+	stream, enc, dec, generation, stop, err := c.tryOpen(targetAddr)
+	if err == nil {
+		return stream, enc, dec, stop, nil
+	}
+	if !errors.Is(err, errHandshakeTimeout) {
+		return nil, nil, nil, nil, err
+	}
+	slog.Info("handshake timed out, redialing")
+	if redialErr := c.redial(generation); redialErr != nil {
+		return nil, nil, nil, nil, redialErr
+	}
+	stream, enc, dec, _, stop, err = c.tryOpen(targetAddr)
+	return stream, enc, dec, stop, err
+}
+
+func (c *Client) tryOpen(targetAddr string) (pb.Tunnel_ConnectClient, *crypto.Cipher, *crypto.Cipher, uint64, context.CancelFunc, error) {
+	c.mu.Lock()
+	tunnel, generation := c.tunnel, c.generation
+	c.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := tunnel.Connect(ctx)
+	if err != nil {
+		cancel()
+		return nil, nil, nil, generation, nil, err
+	}
+
+	type handshakeResult struct {
+		enc *crypto.Cipher
+		dec *crypto.Cipher
+		err error
+	}
+	result := make(chan handshakeResult, 1)
+	go func() {
+		enc, dec, err := c.handshake(stream, targetAddr)
+		result <- handshakeResult{enc, dec, err}
+	}()
+
+	timer := time.NewTimer(c.dialTimeout)
+	defer timer.Stop()
+	select {
+	case res := <-result:
+		if res.err != nil {
+			cancel()
+			return nil, nil, nil, generation, nil, res.err
+		}
+		return stream, res.enc, res.dec, generation, cancel, nil
+	case <-timer.C:
+		cancel()
+		return nil, nil, nil, generation, nil, errHandshakeTimeout
+	}
 }
 
 func (c *Client) handshake(stream pb.Tunnel_ConnectClient, targetAddr string) (enc, dec *crypto.Cipher, err error) {
@@ -272,11 +363,9 @@ func Run(cfg RunConfig) error {
 		serverAddr = resolved
 	}
 
-	tunnel, grpcConn, err := DialServer(serverAddr, cfg.SNI, cfg.Fingerprint, cfg.Insecure)
-	if err != nil {
-		return fmt.Errorf("dial server: %w", err)
+	dial := func() (pb.TunnelClient, *grpc.ClientConn, error) {
+		return DialServer(serverAddr, cfg.SNI, cfg.Fingerprint, cfg.Insecure)
 	}
-	defer grpcConn.Close()
 
 	id, err := crypto.ParsePrivateKey(cfg.PrivateKey)
 	if err != nil {
@@ -293,7 +382,11 @@ func Run(cfg RunConfig) error {
 	}
 
 	dialTimeout := time.Duration(cfg.ConnectSeconds) * time.Second
-	c := New(tunnel, id, serverPub, sessionID, cfg.PadMin, cfg.PadMax, router, dialTimeout)
+	c, err := New(dial, id, serverPub, sessionID, cfg.PadMin, cfg.PadMax, router, dialTimeout)
+	if err != nil {
+		return fmt.Errorf("dial server: %w", err)
+	}
+	defer c.Close()
 	return ListenSOCKS5(cfg.ListenAddr, c.HandleConn)
 }
 
