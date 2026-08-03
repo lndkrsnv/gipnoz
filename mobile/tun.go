@@ -43,20 +43,26 @@ func newTunDevice(fd int, handleTCP func(conn net.Conn, targetAddr string), dohU
 		return nil, fmt.Errorf("link endpoint: %w", err)
 	}
 
+	s, err := newStack(linkEP, handleTCP, dohURL)
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	return &tunDevice{file: file, stack: s}, nil
+}
+
+func newStack(linkEP stack.LinkEndpoint, handleTCP func(conn net.Conn, targetAddr string), dohURL string) (*stack.Stack, error) {
 	s := stack.New(stack.Options{
 		NetworkProtocols:   []stack.NetworkProtocolFactory{ipv4.NewProtocol, ipv6.NewProtocol},
 		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol, udp.NewProtocol},
 	})
 	if tcpipErr := s.CreateNIC(tunNIC, linkEP); tcpipErr != nil {
-		file.Close()
 		return nil, fmt.Errorf("create nic: %s", tcpipErr)
 	}
 	if tcpipErr := s.SetPromiscuousMode(tunNIC, true); tcpipErr != nil {
-		file.Close()
 		return nil, fmt.Errorf("promiscuous mode: %s", tcpipErr)
 	}
 	if tcpipErr := s.SetSpoofing(tunNIC, true); tcpipErr != nil {
-		file.Close()
 		return nil, fmt.Errorf("spoofing: %s", tcpipErr)
 	}
 	s.SetRouteTable([]tcpip.Route{
@@ -73,10 +79,10 @@ func newTunDevice(fd int, handleTCP func(conn net.Conn, targetAddr string), dohU
 			r.Complete(true)
 			return
 		}
-		r.Complete(false)
 		id := r.ID()
+		r.Complete(false)
 		target := net.JoinHostPort(id.LocalAddress.String(), strconv.Itoa(int(id.LocalPort)))
-		go handleTCP(gonet.NewTCPConn(&wq, ep), target)
+		go guardedRun("handleTCP", func() { handleTCP(gonet.NewTCPConn(&wq, ep), target) })
 	})
 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpForwarder.HandlePacket)
 
@@ -89,12 +95,12 @@ func newTunDevice(fd int, handleTCP func(conn net.Conn, targetAddr string), dohU
 		if tcpipErr != nil {
 			return true
 		}
-		go dns.serve(gonet.NewUDPConn(&wq, ep))
+		go guardedRun("dns.serve", func() { dns.serve(gonet.NewUDPConn(&wq, ep)) })
 		return true
 	})
 	s.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
 
-	return &tunDevice{file: file, stack: s}, nil
+	return s, nil
 }
 
 func (t *tunDevice) close() {

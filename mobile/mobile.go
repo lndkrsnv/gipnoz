@@ -3,6 +3,8 @@ package mobile
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -11,6 +13,35 @@ import (
 	"gipnoz/internal/crypto"
 	pb "gipnoz/internal/proto"
 )
+
+func guardedCall(name string, fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("panic in "+name, "panic", r, "stack", string(debug.Stack()))
+			err = fmt.Errorf("%s panicked: %v", name, r)
+		}
+	}()
+	return fn()
+}
+
+func guardedProtect(p Protector, fd uintptr) (ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("panic in protector", "panic", r, "stack", string(debug.Stack()))
+			ok = false
+		}
+	}()
+	return p.Protect(int32(fd))
+}
+
+func guardedRun(name string, fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("panic in "+name, "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+	fn()
+}
 
 type KeyPair struct {
 	Seed string
@@ -56,6 +87,10 @@ var state = struct {
 }{}
 
 func Start(configYAML string, protector Protector, handler StatusHandler) error {
+	return guardedCall("Start", func() error { return start(configYAML, protector, handler) })
+}
+
+func start(configYAML string, protector Protector, handler StatusHandler) error {
 	cfg, err := config.ParseClient([]byte(configYAML))
 	if err != nil {
 		return err
@@ -69,7 +104,7 @@ func Start(configYAML string, protector Protector, handler StatusHandler) error 
 
 	if protector != nil {
 		client.SetProtector(func(fd uintptr) bool {
-			return protector.Protect(int32(fd))
+			return guardedProtect(protector, fd)
 		})
 	}
 
@@ -115,6 +150,10 @@ func Start(configYAML string, protector Protector, handler StatusHandler) error 
 }
 
 func StartTun(fd int32) error {
+	return guardedCall("StartTun", func() error { return startTun(fd) })
+}
+
+func startTun(fd int32) error {
 	state.Lock()
 	defer state.Unlock()
 	if state.client == nil {
