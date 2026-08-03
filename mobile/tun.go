@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"slices"
 	"strconv"
 
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -22,6 +23,12 @@ const (
 	tunMTU = 1500
 	tunNIC = tcpip.NICID(1)
 )
+
+var tunnelLocalAddrs = []tcpip.Address{
+	tcpip.AddrFrom4([4]byte{10, 127, 0, 1}),
+	tcpip.AddrFrom4([4]byte{10, 127, 0, 2}),
+	tcpip.AddrFrom16([16]byte{0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
+}
 
 type tunDevice struct {
 	file  *os.File
@@ -73,13 +80,17 @@ func newStack(linkEP stack.LinkEndpoint, handleTCP func(conn net.Conn, targetAdd
 	dns := newDNSProxy(dohURL)
 
 	tcpForwarder := tcp.NewForwarder(s, 0, 1024, func(r *tcp.ForwarderRequest) {
+		id := r.ID()
+		if slices.Contains(tunnelLocalAddrs, id.LocalAddress) {
+			r.Complete(true)
+			return
+		}
 		var wq waiter.Queue
 		ep, tcpipErr := r.CreateEndpoint(&wq)
 		if tcpipErr != nil {
 			r.Complete(true)
 			return
 		}
-		id := r.ID()
 		r.Complete(false)
 		target := net.JoinHostPort(id.LocalAddress.String(), strconv.Itoa(int(id.LocalPort)))
 		go guardedRun("handleTCP", func() { handleTCP(gonet.NewTCPConn(&wq, ep), target) })

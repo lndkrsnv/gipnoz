@@ -19,7 +19,7 @@ var (
 	testDstAddr = tcpip.AddrFrom4([4]byte{10, 0, 0, 2})
 )
 
-func tcpPacket(srcPort, dstPort uint16, seqNum, ackNum uint32, flags header.TCPFlags) []byte {
+func tcpPacket(dstAddr tcpip.Address, srcPort, dstPort uint16, seqNum, ackNum uint32, flags header.TCPFlags) []byte {
 	tcpSeg := header.TCP(make([]byte, header.TCPMinimumSize))
 	tcpSeg.Encode(&header.TCPFields{
 		SrcPort:    srcPort,
@@ -30,7 +30,7 @@ func tcpPacket(srcPort, dstPort uint16, seqNum, ackNum uint32, flags header.TCPF
 		Flags:      flags,
 		WindowSize: 65535,
 	})
-	xsum := header.PseudoHeaderChecksum(header.TCPProtocolNumber, testSrcAddr, testDstAddr, uint16(len(tcpSeg)))
+	xsum := header.PseudoHeaderChecksum(header.TCPProtocolNumber, testSrcAddr, dstAddr, uint16(len(tcpSeg)))
 	tcpSeg.SetChecksum(^tcpSeg.CalculateChecksum(xsum))
 
 	ip := header.IPv4(make([]byte, header.IPv4MinimumSize))
@@ -39,7 +39,7 @@ func tcpPacket(srcPort, dstPort uint16, seqNum, ackNum uint32, flags header.TCPF
 		TTL:         64,
 		Protocol:    uint8(header.TCPProtocolNumber),
 		SrcAddr:     testSrcAddr,
-		DstAddr:     testDstAddr,
+		DstAddr:     dstAddr,
 	})
 	ip.SetChecksum(^ip.CalculateChecksum())
 	return append(ip, tcpSeg...)
@@ -64,7 +64,7 @@ func TestTCPForwarderHandsConnection(t *testing.T) {
 	}
 	defer s.Close()
 
-	inject(linkEP, tcpPacket(40000, 80, 1, 0, header.TCPFlagSyn))
+	inject(linkEP, tcpPacket(testDstAddr, 40000, 80, 1, 0, header.TCPFlagSyn))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -78,7 +78,7 @@ func TestTCPForwarderHandsConnection(t *testing.T) {
 	}
 	out.DecRef()
 
-	inject(linkEP, tcpPacket(40000, 80, 2, synAck.SequenceNumber()+1, header.TCPFlagAck))
+	inject(linkEP, tcpPacket(testDstAddr, 40000, 80, 2, synAck.SequenceNumber()+1, header.TCPFlagAck))
 
 	select {
 	case target := <-handled:
@@ -87,5 +87,39 @@ func TestTCPForwarderHandsConnection(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("TCP connection was not handed to the handler")
+	}
+}
+
+func TestTunnelLocalAddressesAreReset(t *testing.T) {
+	handled := make(chan string, 1)
+	linkEP := channel.New(10, tunMTU, "")
+	s, err := newStack(linkEP, func(conn net.Conn, targetAddr string) {
+		handled <- targetAddr
+		conn.Close()
+	}, "")
+	if err != nil {
+		t.Fatalf("newStack: %v", err)
+	}
+	defer s.Close()
+
+	dnsAddr := tcpip.AddrFrom4([4]byte{10, 127, 0, 2})
+	inject(linkEP, tcpPacket(dnsAddr, 40000, 853, 1, 0, header.TCPFlagSyn))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out := linkEP.ReadContext(ctx)
+	if out == nil {
+		t.Fatal("no RST from the stack")
+	}
+	reply := header.TCP(out.TransportHeader().Slice())
+	if !reply.Flags().Contains(header.TCPFlagRst) {
+		t.Fatalf("expected RST, got flags %s", reply.Flags())
+	}
+	out.DecRef()
+
+	select {
+	case target := <-handled:
+		t.Fatalf("connection to tunnel-local address reached the handler: %s", target)
+	case <-time.After(300 * time.Millisecond):
 	}
 }
