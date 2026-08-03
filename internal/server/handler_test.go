@@ -33,6 +33,7 @@ var (
 
 type fixture struct {
 	tunnel    pb.TunnelClient
+	srv       *TunnelServer
 	clientID  ed25519.PrivateKey
 	serverPub ed25519.PublicKey
 	secBuf    *bytes.Buffer
@@ -88,6 +89,7 @@ func newFixture(t *testing.T) *fixture {
 
 	return &fixture{
 		tunnel:    pb.NewTunnelClient(conn),
+		srv:       tunnelSrv,
 		clientID:  clientID,
 		serverPub: serverPub,
 		secBuf:    secBuf,
@@ -347,5 +349,25 @@ func TestHandlerSessionExpires(t *testing.T) {
 	}
 	if code, _ := f.attemptHello(t, payload); code != codes.Unavailable {
 		t.Fatalf("after lease expiry: want Unavailable (admitted), got %s", code)
+	}
+}
+
+func TestHandlerSessionReleasedOnTargetFailure(t *testing.T) {
+	f := newFixture(t)
+
+	payload, _, err := crypto.BuildClientHello(f.clientID, decoyTarget, sidOne)
+	if err != nil {
+		t.Fatalf("BuildClientHello: %v", err)
+	}
+	if code, _ := f.attemptHello(t, payload); code != codes.Unavailable {
+		t.Fatalf("want Unavailable (target unreachable), got %s", code)
+	}
+
+	key := string(f.clientID.Public().(ed25519.PublicKey))
+	f.srv.sessions.mu.Lock()
+	streams := f.srv.sessions.sessions[key].streams
+	f.srv.sessions.mu.Unlock()
+	if streams != 0 {
+		t.Fatalf("session slot leaked after failed target dial: streams=%d", streams)
 	}
 }

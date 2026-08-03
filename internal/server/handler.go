@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -116,6 +117,11 @@ func (s *TunnelServer) Connect(stream pb.Tunnel_ConnectServer) error {
 		}
 	}
 
+	release := sync.OnceFunc(func() {
+		s.sessions.release(keyStr, sessionID, time.Now())
+	})
+	defer release()
+
 	slog.Info("connecting to target", "addr", hello.Target, "ip", clientIP, "client", clientName)
 
 	conn, err := net.DialTimeout("tcp", hello.Target, s.dialTimeout)
@@ -153,9 +159,7 @@ func (s *TunnelServer) Connect(stream pb.Tunnel_ConnectServer) error {
 		return status.Error(codes.Internal, "failed to send handshake reply")
 	}
 
-	relay(stream, conn, decCipher, encCipher, s.padMin, s.padMax, s.idleTimeout, func() {
-		s.sessions.release(keyStr, sessionID, time.Now())
-	})
+	relay(stream, conn, decCipher, encCipher, s.padMin, s.padMax, s.idleTimeout, release)
 	return nil
 }
 
