@@ -10,9 +10,8 @@ func TestRouterModeDefaults(t *testing.T) {
 		mode Mode
 		want Action
 	}{
-		{ModeGlobal, Proxy},
-		{ModeBypass, Proxy},
-		{ModeProxyOnly, Direct},
+		{ModeProxyExceptDirect, Proxy},
+		{ModeDirectExceptProxy, Direct},
 	}
 	for _, tc := range cases {
 		r := New(Config{Mode: tc.mode})
@@ -29,7 +28,7 @@ func TestRouterRuleOrder(t *testing.T) {
 	directDomains.Add("trusted.ru")
 
 	r := New(Config{
-		Mode:          ModeProxyOnly,
+		Mode:          ModeDirectExceptProxy,
 		ProxyDomains:  proxyDomains,
 		DirectDomains: directDomains,
 	})
@@ -54,7 +53,7 @@ func TestRouterGeoIPOnIPTarget(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 
-	r := New(Config{Mode: ModeProxyOnly, ProxyCIDRs: proxyCIDRs})
+	r := New(Config{Mode: ModeDirectExceptProxy, ProxyCIDRs: proxyCIDRs})
 
 	if got := r.Decide("203.0.113.10:443"); got != Proxy {
 		t.Fatalf("geoip match: want Proxy, got %v", got)
@@ -77,7 +76,7 @@ func TestRouterGeoIPOnDomainTarget(t *testing.T) {
 		return []netip.Addr{mustAddr(t, "198.51.100.9")}, nil
 	}
 
-	r := New(Config{Mode: ModeProxyOnly, ProxyCIDRs: proxyCIDRs, Resolve: resolve})
+	r := New(Config{Mode: ModeDirectExceptProxy, ProxyCIDRs: proxyCIDRs, Resolve: resolve})
 
 	if got := r.Decide("blocked.com:443"); got != Proxy {
 		t.Fatalf("resolved geoip match: want Proxy, got %v", got)
@@ -93,7 +92,7 @@ func TestRouterNoResolverSkipsGeoIP(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 
-	r := New(Config{Mode: ModeProxyOnly, ProxyCIDRs: proxyCIDRs})
+	r := New(Config{Mode: ModeDirectExceptProxy, ProxyCIDRs: proxyCIDRs})
 
 	if got := r.Decide("blocked.com:443"); got != Direct {
 		t.Fatalf("domain without resolver must fall to default: want Direct, got %v", got)
@@ -101,7 +100,7 @@ func TestRouterNoResolverSkipsGeoIP(t *testing.T) {
 }
 
 func TestParseMode(t *testing.T) {
-	for name, want := range map[string]Mode{"global": ModeGlobal, "bypass": ModeBypass, "proxy_only": ModeProxyOnly} {
+	for name, want := range map[string]Mode{"proxy-except-direct": ModeProxyExceptDirect, "direct-except-proxy": ModeDirectExceptProxy} {
 		mode, ok := ParseMode(name)
 		if !ok || mode != want {
 			t.Fatalf("ParseMode(%q): want %v, got %v (ok=%v)", name, want, mode, ok)

@@ -16,21 +16,18 @@ const (
 type Mode int
 
 const (
-	ModeGlobal Mode = iota
-	ModeBypass
-	ModeProxyOnly
+	ModeProxyExceptDirect Mode = iota
+	ModeDirectExceptProxy
 )
 
 func ParseMode(s string) (Mode, bool) {
 	switch s {
-	case "global":
-		return ModeGlobal, true
-	case "bypass":
-		return ModeBypass, true
-	case "proxy_only":
-		return ModeProxyOnly, true
+	case "proxy-except-direct":
+		return ModeProxyExceptDirect, true
+	case "direct-except-proxy":
+		return ModeDirectExceptProxy, true
 	default:
-		return ModeGlobal, false
+		return ModeProxyExceptDirect, false
 	}
 }
 
@@ -107,7 +104,7 @@ func (r *Router) Decide(targetAddr string) Action {
 }
 
 func (r *Router) defaultAction() Action {
-	if r.mode == ModeProxyOnly {
+	if r.mode == ModeDirectExceptProxy {
 		return Direct
 	}
 	return Proxy

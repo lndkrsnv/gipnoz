@@ -27,10 +27,9 @@ timeouts:
   idle_seconds: 300
 
 # routing:
-#   # global     — everything through the tunnel (default)
-#   # bypass     — tunnel, except destinations matched by `direct` rules
-#   # proxy_only — direct, except destinations matched by `proxy` rules
-#   mode: global
+#   # proxy-except-direct — everything through the tunnel, except `direct` rules (default)
+#   # direct-except-proxy — everything direct, except `proxy` rules
+#   mode: proxy-except-direct
 #   proxy:
 #     domains: ["example.com"]            # suffix match, covers subdomains
 #     domain_lists: ["lists/proxy.txt"]   # lines: `full:host`, `domain:example.com` or bare host

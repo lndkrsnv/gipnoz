@@ -108,7 +108,7 @@ func ParseClient(data []byte) (*ClientConfig, error) {
 		cfg.Timeouts.IdleSeconds = 300
 	}
 	if cfg.Routing.Mode == "" {
-		cfg.Routing.Mode = "global"
+		cfg.Routing.Mode = "proxy-except-direct"
 	}
 	return &cfg, nil
 }

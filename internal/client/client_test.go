@@ -174,7 +174,7 @@ func TestHandleConnDirectRouting(t *testing.T) {
 	tunnel := bufconnTunnel(t, newTunnelServer(t, clientID, serverID))
 
 	serverPub := serverID.Public().(ed25519.PublicKey)
-	router := routing.New(routing.Config{Mode: routing.ModeProxyOnly})
+	router := routing.New(routing.Config{Mode: routing.ModeDirectExceptProxy})
 	c := newClient(t, tunnel, clientID, serverPub, router)
 
 	p1, p2 := net.Pipe()
@@ -321,7 +321,7 @@ func TestProtectorAppliedToDirectDial(t *testing.T) {
 	tunnel := bufconnTunnel(t, newTunnelServer(t, clientID, serverID))
 
 	serverPub := serverID.Public().(ed25519.PublicKey)
-	router := routing.New(routing.Config{Mode: routing.ModeProxyOnly})
+	router := routing.New(routing.Config{Mode: routing.ModeDirectExceptProxy})
 	c := newClient(t, tunnel, clientID, serverPub, router)
 
 	var calls atomic.Int32

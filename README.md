@@ -10,8 +10,8 @@ regular HTTPS traffic.
 - **Camouflage** — gRPC over TLS 1.3, Chrome/Firefox fingerprint, random packet
   padding, the server responds like a normal website.
 - **SOCKS5 proxy on the client** — works with browsers, curl, proxychains.
-- **Client-side routing** — global / bypass / proxy_only modes, rules by domains
-  and GeoIP subnets, ready-made
+- **Client-side routing** — proxy-except-direct / direct-except-proxy modes,
+  rules by domains and GeoIP subnets, ready-made
   [runetfreedom](https://github.com/runetfreedom/russia-blocked-geoip) lists
   supported out of the box.
 - **DoH** — optional resolver against DNS leaks.
