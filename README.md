@@ -4,7 +4,6 @@
 
 <p align="center">
   <a href="https://github.com/lndkrsnv/gipnoz/actions/workflows/ci.yml"><img src="https://github.com/lndkrsnv/gipnoz/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
-  <a href="https://github.com/lndkrsnv/gipnoz/actions/workflows/codeql.yml"><img src="https://github.com/lndkrsnv/gipnoz/actions/workflows/codeql.yml/badge.svg" alt="codeql"></a>
   <a href="https://github.com/lndkrsnv/gipnoz/releases"><img src="https://img.shields.io/github/v/release/lndkrsnv/gipnoz?include_prereleases" alt="release"></a>
   <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/lndkrsnv/gipnoz" alt="go version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/lndkrsnv/gipnoz" alt="license"></a>
