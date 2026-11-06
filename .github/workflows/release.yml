@@ -67,7 +67,11 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - run: go install golang.org/x/mobile/cmd/gomobile@latest
+      - name: install gomobile and gobind
+        run: |
+          version=$(go list -m -f '{{.Version}}' golang.org/x/mobile)
+          go install "golang.org/x/mobile/cmd/gomobile@${version}"
+          go install "golang.org/x/mobile/cmd/gobind@${version}"
       - name: install Android SDK
         run: |
           sdk="$RUNNER_TEMP/android-sdk"
