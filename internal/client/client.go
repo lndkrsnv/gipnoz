@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,8 @@ import (
 	"gipnoz/internal/routing"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -208,6 +211,16 @@ func (c *Client) HandleConn(conn net.Conn, targetAddr string) {
 	c.handleTunnel(conn, targetAddr)
 }
 
+func sessionFatal(err error) bool {
+	switch status.Code(err) {
+	case codes.ResourceExhausted:
+		return strings.Contains(err.Error(), "key in use by another device")
+	case codes.Unauthenticated:
+		return true
+	}
+	return strings.Contains(err.Error(), "verify server hello")
+}
+
 func (c *Client) handleTunnel(conn net.Conn, targetAddr string) {
 	defer conn.Close()
 	start := time.Now()
@@ -218,7 +231,9 @@ func (c *Client) handleTunnel(conn net.Conn, targetAddr string) {
 			return
 		}
 		slog.Warn("failed to open tunnel", "err", err)
-		c.emitStatus(StatusError, err.Error())
+		if sessionFatal(err) {
+			c.emitStatus(StatusError, err.Error())
+		}
 		return
 	}
 	defer stopStream()

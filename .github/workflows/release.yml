@@ -74,7 +74,9 @@ jobs:
         id: meta
         run: |
           tags="ghcr.io/${GITHUB_REPOSITORY}:${GITHUB_REF_NAME}"
-          if [[ "$GITHUB_REF_NAME" != *-* ]]; then
+          if [[ "$GITHUB_REF_NAME" == *alpha* ]]; then
+            tags="${tags},ghcr.io/${GITHUB_REPOSITORY}:alpha-latest"
+          elif [[ "$GITHUB_REF_NAME" != *-* ]]; then
             tags="${tags},ghcr.io/${GITHUB_REPOSITORY}:latest"
           fi
           echo "tags=$tags" >> "$GITHUB_OUTPUT"

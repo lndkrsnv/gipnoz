@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -348,6 +349,69 @@ func TestCloseSendsGoodbye(t *testing.T) {
 		t.Fatalf("c2 openStream after goodbye: %v", err)
 	}
 	defer stop2()
+}
+
+func TestHandleConnSessionBusyEmitsError(t *testing.T) {
+	echo := echoTarget(t)
+	clientID, serverID := newTestPair(t)
+	serverPub := serverID.Public().(ed25519.PublicKey)
+	tunnel := bufconnTunnel(t, newTunnelServer(t, clientID, serverID))
+
+	dial := func() (pb.TunnelClient, *grpc.ClientConn, error) {
+		return tunnel, nil, nil
+	}
+	holder, err := New(dial, clientID, serverPub, []byte("aaaaaaaaaaaaaaaa"), 16, 256, nil, 2*time.Second)
+	if err != nil {
+		t.Fatalf("New holder: %v", err)
+	}
+	defer holder.Close()
+	_, _, _, stop, err := holder.openStream(echo)
+	if err != nil {
+		t.Fatalf("holder openStream: %v", err)
+	}
+	defer stop()
+
+	c, err := New(dial, clientID, serverPub, []byte("bbbbbbbbbbbbbbbb"), 16, 256, nil, 2*time.Second)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer c.Close()
+
+	var statuses []string
+	c.SetStatusHandler(func(status, detail string) {
+		statuses = append(statuses, status+": "+detail)
+	})
+
+	p1, p2 := net.Pipe()
+	defer p1.Close()
+	defer p2.Close()
+	c.HandleConn(p1, echo)
+
+	if len(statuses) != 1 || !strings.Contains(statuses[0], StatusError) ||
+		!strings.Contains(statuses[0], "key in use by another device") {
+		t.Fatalf("want one error status with the lease rejection, got %v", statuses)
+	}
+}
+
+func TestHandleConnTargetUnreachableNoStatus(t *testing.T) {
+	clientID, serverID := newTestPair(t)
+	serverPub := serverID.Public().(ed25519.PublicKey)
+	tunnel := bufconnTunnel(t, newTunnelServer(t, clientID, serverID))
+	c := newClient(t, tunnel, clientID, serverPub, nil)
+
+	var statuses []string
+	c.SetStatusHandler(func(status, detail string) {
+		statuses = append(statuses, status+": "+detail)
+	})
+
+	p1, p2 := net.Pipe()
+	defer p1.Close()
+	defer p2.Close()
+	c.HandleConn(p1, "127.0.0.1:1")
+
+	if len(statuses) != 0 {
+		t.Fatalf("target unreachable must not emit a status, got %v", statuses)
+	}
 }
 
 func TestProtectorAppliedToDirectDial(t *testing.T) {
