@@ -2,6 +2,15 @@
   <img src="logo.png" alt="gipnoz" width="400">
 </p>
 
+<p align="center">
+  <a href="https://github.com/lndkrsnv/gipnoz/actions/workflows/ci.yml"><img src="https://github.com/lndkrsnv/gipnoz/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
+  <a href="https://github.com/lndkrsnv/gipnoz/releases"><img src="https://img.shields.io/github/v/release/lndkrsnv/gipnoz?include_prereleases" alt="release"></a>
+  <a href="https://goreportcard.com/report/github.com/lndkrsnv/gipnoz"><img src="https://goreportcard.com/badge/github.com/lndkrsnv/gipnoz" alt="Go Report Card"></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/lndkrsnv/gipnoz" alt="go version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/lndkrsnv/gipnoz" alt="license"></a>
+  <a href="https://github.com/lndkrsnv/gipnoz/pkgs/container/gipnoz"><img src="https://img.shields.io/badge/ghcr.io-lndkrsnv%2Fgipnoz-blue?logo=docker&logoColor=white" alt="ghcr"></a>
+</p>
+
 Yet another tool for using the internet freely. A tunnel that looks like
 regular HTTPS traffic.
 
