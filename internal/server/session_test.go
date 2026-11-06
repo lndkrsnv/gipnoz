@@ -62,6 +62,34 @@ func TestSessionReleaseWrongID(t *testing.T) {
 	}
 }
 
+func TestSessionEnd(t *testing.T) {
+	r := newSessionRegistry(time.Minute)
+	now := time.Now()
+
+	r.admit("key", "sess-a", "203.0.113.1", now)
+	r.release("key", "sess-a", now)
+	r.end("key", "sess-a")
+
+	res := r.admit("key", "sess-b", "203.0.113.2", now.Add(30*time.Second))
+	if !res.ok || res.busy {
+		t.Fatalf("end with matching id must free the session within grace, got %+v", res)
+	}
+}
+
+func TestSessionEndWrongID(t *testing.T) {
+	r := newSessionRegistry(time.Minute)
+	now := time.Now()
+
+	r.admit("key", "sess-a", "203.0.113.1", now)
+	r.release("key", "sess-a", now)
+	r.end("key", "sess-b")
+
+	res := r.admit("key", "sess-b", "203.0.113.2", now.Add(30*time.Second))
+	if !res.busy {
+		t.Fatalf("end with wrong id must keep the session busy within grace, got %+v", res)
+	}
+}
+
 func TestSessionFlapping(t *testing.T) {
 	r := newSessionRegistry(time.Minute)
 	now := time.Now()

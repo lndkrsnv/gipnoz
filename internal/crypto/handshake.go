@@ -16,6 +16,8 @@ import (
 const (
 	TimestampToleranceSeconds = 30
 
+	GoodbyeTarget = "gipnoz:goodbye"
+
 	ephemeralPubLen = 32
 	SessionIDLen    = 16
 

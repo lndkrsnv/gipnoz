@@ -315,6 +315,41 @@ func TestCloseStopsHandleConn(t *testing.T) {
 	}
 }
 
+func TestCloseSendsGoodbye(t *testing.T) {
+	echo := echoTarget(t)
+	clientID, serverID := newTestPair(t)
+	serverPub := serverID.Public().(ed25519.PublicKey)
+	tunnel := bufconnTunnel(t, newTunnelServer(t, clientID, serverID))
+
+	dial := func() (pb.TunnelClient, *grpc.ClientConn, error) {
+		return tunnel, nil, nil
+	}
+	c1, err := New(dial, clientID, serverPub, []byte("aaaaaaaaaaaaaaaa"), 16, 256, nil, 2*time.Second)
+	if err != nil {
+		t.Fatalf("New c1: %v", err)
+	}
+
+	_, _, _, stop1, err := c1.openStream(echo)
+	if err != nil {
+		t.Fatalf("c1 openStream: %v", err)
+	}
+	defer stop1()
+
+	c1.Close()
+
+	c2, err := New(dial, clientID, serverPub, []byte("bbbbbbbbbbbbbbbb"), 16, 256, nil, 2*time.Second)
+	if err != nil {
+		t.Fatalf("New c2: %v", err)
+	}
+	defer c2.Close()
+
+	_, _, _, stop2, err := c2.openStream(echo)
+	if err != nil {
+		t.Fatalf("c2 openStream after goodbye: %v", err)
+	}
+	defer stop2()
+}
+
 func TestProtectorAppliedToDirectDial(t *testing.T) {
 	echo := echoTarget(t)
 	clientID, serverID := newTestPair(t)

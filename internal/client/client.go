@@ -93,6 +93,7 @@ func (c *Client) redial(generation uint64) error {
 }
 
 const closeDrainTimeout = 5 * time.Second
+const goodbyeTimeout = 2 * time.Second
 
 func (c *Client) Close() {
 	c.mu.Lock()
@@ -102,8 +103,12 @@ func (c *Client) Close() {
 	}
 	c.stopped = true
 	conn := c.conn
+	tunnel := c.tunnel
 	c.mu.Unlock()
 
+	if tunnel != nil {
+		c.sendGoodbye(tunnel)
+	}
 	if conn != nil {
 		conn.Close()
 	}
@@ -117,6 +122,37 @@ func (c *Client) Close() {
 	case <-drained:
 	case <-time.After(closeDrainTimeout):
 		slog.Warn("client close: timed out waiting for active connections")
+	}
+}
+
+func (c *Client) sendGoodbye(tunnel pb.TunnelClient) {
+	ctx, cancel := context.WithTimeout(context.Background(), goodbyeTimeout)
+	defer cancel()
+	stream, err := tunnel.Connect(ctx)
+	if err != nil {
+		slog.Debug("goodbye: open stream", "err", err)
+		return
+	}
+	payload, _, err := crypto.BuildClientHello(c.id, crypto.GoodbyeTarget, c.sessionID)
+	if err != nil {
+		slog.Debug("goodbye: build hello", "err", err)
+		return
+	}
+	padding, err := crypto.GeneratePadding(c.padMin, c.padMax)
+	if err != nil {
+		slog.Debug("goodbye: padding", "err", err)
+		return
+	}
+	if err := stream.Send(&pb.Chunk{Payload: payload, Padding: padding}); err != nil {
+		slog.Debug("goodbye: send", "err", err)
+		return
+	}
+	if err := stream.CloseSend(); err != nil {
+		slog.Debug("goodbye: close send", "err", err)
+		return
+	}
+	if _, err := stream.Recv(); err != nil && !errors.Is(err, io.EOF) {
+		slog.Debug("goodbye: recv", "err", err)
 	}
 }
 

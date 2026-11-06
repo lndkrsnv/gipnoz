@@ -85,6 +85,15 @@ func (r *sessionRegistry) release(key, id string, now time.Time) {
 	s.lastSeen = now
 }
 
+func (r *sessionRegistry) end(key, id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if s, ok := r.sessions[key]; ok && s.id == id {
+		delete(r.sessions, key)
+	}
+}
+
 func (r *sessionRegistry) busyLoggedRecently(key string, now time.Time) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()

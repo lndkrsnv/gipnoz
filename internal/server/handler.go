@@ -96,6 +96,13 @@ func (s *TunnelServer) Connect(stream pb.Tunnel_ConnectServer) error {
 
 	keyStr := string(hello.IDPub)
 	sessionID := string(hello.SessionID)
+
+	if hello.Target == crypto.GoodbyeTarget {
+		s.sessions.end(keyStr, sessionID)
+		slog.Info("session closed by client", "client", clientName, "ip", clientIP)
+		return nil
+	}
+
 	admit := s.sessions.admit(keyStr, sessionID, clientIP, time.Now())
 	if admit.busy {
 		slog.Warn("session busy", "ip", clientIP, "client", clientName, "holder_ip", admit.holderIP)

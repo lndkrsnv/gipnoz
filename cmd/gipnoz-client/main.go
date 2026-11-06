@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"gipnoz/internal/client"
@@ -38,7 +40,7 @@ func main() {
 		return
 	}
 
-	if err := client.Run(client.RunConfig{
+	c, lis, err := client.Start(client.RunConfig{
 		ServerAddr:      cfg.Server.Address,
 		SNI:             cfg.Server.SNI,
 		PrivateKey:      cfg.Auth.PrivateKey,
@@ -51,10 +53,26 @@ func main() {
 		PadMax:          cfg.Padding.Max,
 		ConnectSeconds:  cfg.Timeouts.ConnectSeconds,
 		Routing:         cfg.Routing,
-	}); err != nil {
+	})
+	if err != nil {
 		slog.Error("client error", "err", err)
 		os.Exit(1)
 	}
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		s := <-sig
+		slog.Info("shutting down", "signal", s)
+		lis.Close()
+	}()
+
+	if err := client.ServeSOCKS5(lis, c.HandleConn); err != nil {
+		c.Close()
+		slog.Error("client error", "err", err)
+		os.Exit(1)
+	}
+	c.Close()
 }
 
 func runKeygen() {

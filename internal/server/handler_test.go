@@ -371,3 +371,51 @@ func TestHandlerSessionReleasedOnTargetFailure(t *testing.T) {
 		t.Fatalf("session slot leaked after failed target dial: streams=%d", streams)
 	}
 }
+
+func TestHandlerGoodbye(t *testing.T) {
+	f := newFixture(t)
+	echo := echoTarget(t)
+
+	stream1 := f.openStream(t, echo, sidOne, "203.0.113.1")
+	defer stream1.CloseSend()
+
+	goodbye, _, err := crypto.BuildClientHello(f.clientID, crypto.GoodbyeTarget, sidOne)
+	if err != nil {
+		t.Fatalf("BuildClientHello: %v", err)
+	}
+	if _, err := f.attemptHello(t, goodbye); err != io.EOF {
+		t.Fatalf("goodbye: want clean stream close, got %v", err)
+	}
+
+	payload, _, err := crypto.BuildClientHello(f.clientID, decoyTarget, sidTwo)
+	if err != nil {
+		t.Fatalf("BuildClientHello: %v", err)
+	}
+	if code, _ := f.attemptHello(t, payload); code != codes.Unavailable {
+		t.Fatalf("after goodbye: want Unavailable (admitted), got %s", code)
+	}
+}
+
+func TestHandlerGoodbyeForeignSession(t *testing.T) {
+	f := newFixture(t)
+	echo := echoTarget(t)
+
+	stream1 := f.openStream(t, echo, sidOne, "203.0.113.1")
+	defer stream1.CloseSend()
+
+	goodbye, _, err := crypto.BuildClientHello(f.clientID, crypto.GoodbyeTarget, sidTwo)
+	if err != nil {
+		t.Fatalf("BuildClientHello: %v", err)
+	}
+	if _, err := f.attemptHello(t, goodbye); err != io.EOF {
+		t.Fatalf("goodbye: want clean stream close, got %v", err)
+	}
+
+	payload, _, err := crypto.BuildClientHello(f.clientID, decoyTarget, sidTwo)
+	if err != nil {
+		t.Fatalf("BuildClientHello: %v", err)
+	}
+	if code, _ := f.attemptHello(t, payload); code != codes.ResourceExhausted {
+		t.Fatalf("goodbye with foreign session id: want still busy (ResourceExhausted), got %s", code)
+	}
+}
