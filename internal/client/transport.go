@@ -62,16 +62,15 @@ func (c *utlsCredentials) ClientHandshake(ctx context.Context, _ string, rawConn
 
 	state := conn.ConnectionState()
 	tlsInfo := credentials.TLSInfo{State: stdtls.ConnectionState{
-		Version:                    state.Version,
-		HandshakeComplete:          state.HandshakeComplete,
-		CipherSuite:                state.CipherSuite,
-		NegotiatedProtocol:         state.NegotiatedProtocol,
-		NegotiatedProtocolIsMutual: state.NegotiatedProtocolIsMutual,
-		ServerName:                 state.ServerName,
-		PeerCertificates:           state.PeerCertificates,
-		VerifiedChains:             state.VerifiedChains,
-		OCSPResponse:               state.OCSPResponse,
-		TLSUnique:                  state.TLSUnique,
+		Version:            state.Version,
+		HandshakeComplete:  state.HandshakeComplete,
+		CipherSuite:        state.CipherSuite,
+		NegotiatedProtocol: state.NegotiatedProtocol,
+		ServerName:         state.ServerName,
+		PeerCertificates:   state.PeerCertificates,
+		VerifiedChains:     state.VerifiedChains,
+		OCSPResponse:       state.OCSPResponse,
+		TLSUnique:          state.TLSUnique,
 	}}
 	return conn, tlsInfo, nil
 }

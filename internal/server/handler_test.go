@@ -363,9 +363,8 @@ func TestHandlerSessionReleasedOnTargetFailure(t *testing.T) {
 		t.Fatalf("want Unavailable (target unreachable), got %s", code)
 	}
 
-	key := string(f.clientID.Public().(ed25519.PublicKey))
 	f.srv.sessions.mu.Lock()
-	streams := f.srv.sessions.sessions[key].streams
+	streams := f.srv.sessions.sessions[string(f.clientID.Public().(ed25519.PublicKey))].streams
 	f.srv.sessions.mu.Unlock()
 	if streams != 0 {
 		t.Fatalf("session slot leaked after failed target dial: streams=%d", streams)

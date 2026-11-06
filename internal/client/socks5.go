@@ -66,13 +66,17 @@ func socks5Handshake(conn net.Conn) (string, error) {
 		return "", fmt.Errorf("read connect request: %w", err)
 	}
 	if req[1] != cmdConnect {
-		sendReply(conn, repUnsupported)
+		if err := sendReply(conn, repUnsupported); err != nil {
+			return "", err
+		}
 		return "", fmt.Errorf("unsupported command: %d", req[1])
 	}
 
 	host, err := readHost(conn, req[3])
 	if err != nil {
-		sendReply(conn, repUnsupportedAt)
+		if replyErr := sendReply(conn, repUnsupportedAt); replyErr != nil {
+			return "", replyErr
+		}
 		return "", err
 	}
 
@@ -82,7 +86,9 @@ func socks5Handshake(conn net.Conn) (string, error) {
 	}
 	port := binary.BigEndian.Uint16(portBuf)
 
-	sendReply(conn, repSuccess)
+	if err := sendReply(conn, repSuccess); err != nil {
+		return "", err
+	}
 	return net.JoinHostPort(host, strconv.Itoa(int(port))), nil
 }
 
@@ -115,7 +121,10 @@ func readHost(conn net.Conn, addrType byte) (string, error) {
 	}
 }
 
-func sendReply(conn net.Conn, rep byte) {
+func sendReply(conn net.Conn, rep byte) error {
 	reply := []byte{socks5Version, rep, 0x00, atypIPv4, 0, 0, 0, 0, 0, 0}
-	conn.Write(reply)
+	if _, err := conn.Write(reply); err != nil {
+		return fmt.Errorf("write reply: %w", err)
+	}
+	return nil
 }
