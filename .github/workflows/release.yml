@@ -90,9 +90,7 @@ jobs:
         run: gomobile bind -target android/arm64,android/amd64 -androidapi 26 -ldflags "-extldflags=-Wl,-z,max-page-size=16384" -o gipnoz.aar ./mobile
       - uses: softprops/action-gh-release@v3
         with:
-          files: |
-            gipnoz.aar
-            gipnoz-sources.jar
+          files: gipnoz.aar
           fail_on_unmatched_files: true
           prerelease: ${{ contains(github.ref_name, '-') }}
 
