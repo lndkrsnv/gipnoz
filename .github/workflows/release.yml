@@ -67,13 +67,21 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: android-actions/setup-android@v3
       - run: go install golang.org/x/mobile/cmd/gomobile@latest
+      - name: install Android SDK
+        run: |
+          sdk="$RUNNER_TEMP/android-sdk"
+          curl -sSLo cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-16111833_latest.zip
+          mkdir -p "$sdk/cmdline-tools"
+          unzip -q cmdtools.zip -d "$sdk/cmdline-tools"
+          mv "$sdk/cmdline-tools/cmdline-tools" "$sdk/cmdline-tools/latest"
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$sdk/ndk/26.1.10909125" >> "$GITHUB_ENV"
+          echo "$sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
       - name: install Android NDK
         run: |
           yes | sdkmanager --licenses > /dev/null
           sdkmanager "ndk;26.1.10909125"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> "$GITHUB_ENV"
       - name: build AAR
         run: gomobile bind -target android/arm64,android/amd64 -androidapi 26 -ldflags "-extldflags=-Wl,-z,max-page-size=16384" -o gipnoz.aar ./mobile
       - uses: softprops/action-gh-release@v3
