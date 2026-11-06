@@ -82,10 +82,10 @@ jobs:
           echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$sdk/ndk/26.1.10909125" >> "$GITHUB_ENV"
           echo "$sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-      - name: install Android NDK
+      - name: install Android platform and NDK
         run: |
           yes | sdkmanager --licenses > /dev/null
-          sdkmanager "ndk;26.1.10909125"
+          sdkmanager "platforms;android-36" "ndk;26.1.10909125"
       - name: build AAR
         run: gomobile bind -target android/arm64,android/amd64 -androidapi 26 -ldflags "-extldflags=-Wl,-z,max-page-size=16384" -o gipnoz.aar ./mobile
       - uses: softprops/action-gh-release@v3
