@@ -1,11 +1,15 @@
 package mobile
 
 import (
+	"bytes"
 	"context"
 	"net"
+	"os"
+	"runtime"
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
@@ -87,6 +91,42 @@ func TestTCPForwarderHandsConnection(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("TCP connection was not handed to the handler")
+	}
+}
+
+func tunDispatcherRunning() bool {
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, true)
+	return bytes.Contains(buf[:n], []byte("fdbased.(*endpoint).dispatchLoop"))
+}
+
+func TestTunCloseStopsDispatcher(t *testing.T) {
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
+	if err != nil {
+		t.Fatalf("socketpair: %v", err)
+	}
+	peer := os.NewFile(uintptr(fds[1]), "peer")
+	defer peer.Close()
+
+	tun, err := newTunDevice(fds[0], func(conn net.Conn, _ string) { conn.Close() }, "")
+	if err != nil {
+		t.Fatalf("newTunDevice: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !tunDispatcherRunning() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !tunDispatcherRunning() {
+		t.Fatal("tun dispatcher is not running after newTunDevice")
+	}
+
+	start := time.Now()
+	tun.close()
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("close took %v on an idle tunnel", elapsed)
+	}
+	if tunDispatcherRunning() {
+		t.Fatal("tun dispatcher goroutine survived close")
 	}
 }
 

@@ -38,6 +38,7 @@ type Client struct {
 	conn       *grpc.ClientConn
 	generation uint64
 	stopped    bool
+	done       chan struct{}
 	onStatus   func(status, detail string)
 	wg         sync.WaitGroup
 
@@ -63,6 +64,7 @@ func New(dial func() (pb.TunnelClient, *grpc.ClientConn, error), id ed25519.Priv
 		padMax:      padMax,
 		router:      router,
 		dialTimeout: dialTimeout,
+		done:        make(chan struct{}),
 	}
 	if err := c.redial(0); err != nil {
 		return nil, err
@@ -105,6 +107,7 @@ func (c *Client) Close() {
 		return
 	}
 	c.stopped = true
+	close(c.done)
 	conn := c.conn
 	tunnel := c.tunnel
 	c.mu.Unlock()
@@ -433,6 +436,17 @@ func (c *Client) handleDirect(conn net.Conn, targetAddr string) {
 	}
 	defer target.Close()
 	slog.Info("direct connection", "target", targetAddr)
+
+	watched := make(chan struct{})
+	defer close(watched)
+	go func() {
+		select {
+		case <-c.done:
+			target.Close()
+			conn.Close()
+		case <-watched:
+		}
+	}()
 
 	var (
 		wg        sync.WaitGroup

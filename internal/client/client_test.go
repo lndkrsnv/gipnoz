@@ -414,6 +414,59 @@ func TestHandleConnTargetUnreachableNoStatus(t *testing.T) {
 	}
 }
 
+func TestCloseStopsIdleDirectConn(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("blackhole listen: %v", err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			accepted <- conn
+		}
+	}()
+
+	clientID, serverID := newTestPair(t)
+	serverPub := serverID.Public().(ed25519.PublicKey)
+	tunnel := bufconnTunnel(t, newTunnelServer(t, clientID, serverID))
+	router := routing.New(routing.Config{Mode: routing.ModeDirectExceptProxy})
+	c := newClient(t, tunnel, clientID, serverPub, router)
+
+	p1, p2 := net.Pipe()
+	defer p1.Close()
+	defer p2.Close()
+	handled := make(chan struct{})
+	go func() {
+		c.HandleConn(p1, ln.Addr().String())
+		close(handled)
+	}()
+
+	var serverSide net.Conn
+	select {
+	case serverSide = <-accepted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("direct connection was not established")
+	}
+	defer serverSide.Close()
+
+	start := time.Now()
+	c.Close()
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("Close took %v with an idle direct connection", elapsed)
+	}
+
+	select {
+	case <-handled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HandleConn did not finish after Close")
+	}
+}
+
 func TestProtectorAppliedToDirectDial(t *testing.T) {
 	echo := echoTarget(t)
 	clientID, serverID := newTestPair(t)

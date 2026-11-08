@@ -115,6 +115,6 @@ func newStack(linkEP stack.LinkEndpoint, handleTCP func(conn net.Conn, targetAdd
 }
 
 func (t *tunDevice) close() {
-	t.stack.Close()
+	t.stack.Destroy()
 	t.file.Close()
 }
